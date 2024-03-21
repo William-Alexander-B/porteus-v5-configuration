@@ -1,0 +1,4 @@
+[Desktop Entry]
+Name=Linux
+Icon=debian
+Exec=/usr/bin/remmina --no-tray-icon --enable-fullscreen -c ~/.local/share/remmina/servidor-linux.remmina

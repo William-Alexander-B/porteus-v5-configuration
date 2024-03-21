@@ -1,0 +1,4 @@
+[Desktop Entry]
+Name=Mac
+Icon=mac
+Exec=/usr/bin/remmina --no-tray-icon --enable-fullscreen -c ~/.local/share/remmina/servidor-mac.remmina
