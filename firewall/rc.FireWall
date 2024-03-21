@@ -1,0 +1,147 @@
+#!/bin/bash
+#
+# Usage: rc.firewall start|stop|status
+#
+# Simple firewall disallowing all incomming connections
+# but allowing all traffic on localhost (lo device)
+# and allowing all outgoing traffic for $ALLOWED_PORTS
+# (you can set the variable below)
+#
+# Author: Tomas M. <http://slax.linux-live.org/>
+#
+ALLOWED_PORTS="22 80 8080 443 8443 3389"
+#-----------------------------------------------------------
+
+# Start the firewall
+if [ "$1" = "start" ]; then
+
+    SYSCTLW="/sbin/sysctl -q -w"
+    IPTABLES="/usr/sbin/iptables"
+    IPTABLES6="/usr/sbin/ip6tables"
+
+    # Disable routing triangulation. Respond to queries out
+    # the same interface, not another. Helps to maintain state
+    # Also protects against IP spoofing
+
+    $SYSCTLW net.ipv4.conf.all.rp_filter=1
+
+    # Enable logging of packets with malformed IP addresses,
+    # Disable redirects,
+    # Disable source routed packets,
+    # Disable acceptance of ICMP redirects,
+    # Turn on protection from Denial of Service (DOS) attacks,
+    # Disable responding to ping broadcasts,
+    # Enable IP routing. Required if your firewall is protecting a network, NAT included
+
+    $SYSCTLW net.ipv4.conf.all.log_martians=1
+    $SYSCTLW net.ipv4.conf.all.send_redirects=0
+    $SYSCTLW net.ipv4.conf.all.accept_source_route=0
+    $SYSCTLW net.ipv4.conf.all.accept_redirects=0
+    $SYSCTLW net.ipv4.tcp_syncookies=1
+    $SYSCTLW net.ipv4.icmp_echo_ignore_broadcasts=1
+    $SYSCTLW net.ipv4.ip_forward=1
+
+    # Firewall initialization: remove everything and start with clean tables
+    $IPTABLES -F      # Remove all rules
+    $IPTABLES -X      # Delete all user-defined chains
+    # Same for IPv6
+    $IPTABLES6 -F     # Remove all rules
+    $IPTABLES6 -X     # Delete all user-defined chains
+
+    # Drop everything by default
+    $IPTABLES -P INPUT DROP
+    $IPTABLES -P OUTPUT DROP
+    $IPTABLES -P FORWARD DROP
+    # Same for IPv6
+    $IPTABLES6 -P INPUT DROP
+    $IPTABLES6 -P OUTPUT DROP
+    $IPTABLES6 -P FORWARD DROP
+
+    # Allow everything for the loop device
+    $IPTABLES -A INPUT -i lo -j ACCEPT
+    $IPTABLES -A OUTPUT -o lo -j ACCEPT
+    # Same for IPv6
+    $IPTABLES6 -A INPUT -i lo -j ACCEPT
+    $IPTABLES6 -A OUTPUT -o lo -j ACCEPT
+
+    # Allow pings
+    $IPTABLES -A INPUT -p icmp -j ACCEPT
+    $IPTABLES -A OUTPUT -p icmp -j ACCEPT
+    # Same for IPv6
+    $IPTABLES6 -A INPUT -p ipv6-icmp -j ACCEPT
+    $IPTABLES6 -A OUTPUT -p ipv6-icmp -j ACCEPT
+
+    # Allow previously established connections
+    $IPTABLES -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    $IPTABLES6 -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+    # Allow DNS queries
+    $IPTABLES -A INPUT -p udp --sport 53 -j ACCEPT
+    $IPTABLES -A OUTPUT -p udp --dport 53 -j ACCEPT
+    # Same for IPv6
+    $IPTABLES6 -A INPUT -p udp --sport 53 -j ACCEPT
+    $IPTABLES6 -A OUTPUT -p udp --dport 53 -j ACCEPT
+
+    # Configure each input port
+    for PORT in $ALLOWED_PORTS; do
+        $IPTABLES -A INPUT -p tcp --sport $PORT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        $IPTABLES6 -A INPUT -p tcp --sport $PORT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    done
+
+    # Configure each output port
+    for PORT in $ALLOWED_PORTS; do
+        $IPTABLES -A OUTPUT -p tcp --dport $PORT -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+        $IPTABLES6 -A OUTPUT -p tcp --dport $PORT -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+    done
+
+    # Create a chain for logging all dropped packets
+    $IPTABLES -N LOG_DROP
+    $IPTABLES -A LOG_DROP -j LOG --log-prefix "Attack log: " --log-level 7
+    # Same for IPv6
+    $IPTABLES6 -N LOG_DROP
+    $IPTABLES6 -A LOG_DROP -j LOG --log-prefix "Attack log: " --log-level 7
+
+    # Log all dropped packets
+    $IPTABLES -A INPUT -j LOG_DROP
+    $IPTABLES -A OUTPUT -j LOG_DROP
+    $IPTABLES -A FORWARD -j LOG_DROP
+    # Same for IPv6
+    $IPTABLES6 -A INPUT -j LOG_DROP
+    $IPTABLES6 -A OUTPUT -j LOG_DROP
+    $IPTABLES6 -A FORWARD -j LOG_DROP
+
+    # Drop the packets after being logged
+    $IPTABLES -A LOG_DROP -j DROP
+    # Same for IPv6
+    $IPTABLES6 -A LOG_DROP -j DROP
+
+# Stop the firewall
+elif [ "$1" = "stop" ]; then
+
+    # Remove all rules and user-defined chains; also allow everything
+    iptables -F
+    iptables -X
+    iptables -P INPUT ACCEPT
+    iptables -P OUTPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+    # Same for IPv6
+    ip6tables -F
+    ip6tables -X
+    ip6tables -P INPUT ACCEPT
+    ip6tables -P OUTPUT ACCEPT
+    ip6tables -P FORWARD ACCEPT
+
+# Show the current status of the firewall
+elif [ "$1" = "status" ]; then
+
+    printf "IPv4 rules\n"
+    iptables -L -v --line-numbers
+    printf "\n\nIPv6 rules\n"
+    ip6tables -L -v --line-numbers
+
+# Show the script usage
+else
+
+    echo "Usage: $(basename $0) start|stop|status"
+
+fi
